@@ -8,6 +8,7 @@ import net.dv8tion.jda.api.utils.MemberCachePolicy;
 import net.dv8tion.jda.api.utils.cache.CacheFlag;
 import nl.finnt730.commands.CommandMigrator;
 import nl.finnt730.listeners.CommandListener;
+import nl.finnt730.listeners.DeleteListener;
 import nl.finnt730.listeners.PasteListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -60,6 +61,7 @@ public final class Main {
             JDABuilder.createLight(botToken, EnumSet.of(GatewayIntent.GUILD_MESSAGES, GatewayIntent.MESSAGE_CONTENT, GatewayIntent.GUILD_MESSAGE_POLLS, GatewayIntent.GUILD_MEMBERS, GatewayIntent.GUILD_MESSAGE_REACTIONS))
                     .addEventListeners(new CommandListener())
                     .addEventListeners(new PasteListener())
+                    .addEventListeners(new DeleteListener())
                     .enableCache(CacheFlag.ROLE_TAGS)
                     .setMemberCachePolicy(MemberCachePolicy.ALL) // Would do ONLINE but I don't think that will work if you aren't literally set to Online status.
                     .build();
