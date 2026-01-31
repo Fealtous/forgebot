@@ -1,29 +1,29 @@
 package nl.finnt730.listeners;
 
-import net.dv8tion.jda.api.entities.Message;
-import net.dv8tion.jda.api.entities.MessageReaction;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import net.dv8tion.jda.api.entities.emoji.Emoji;
 import net.dv8tion.jda.api.events.message.MessageReceivedEvent;
 import net.dv8tion.jda.api.events.message.react.MessageReactionAddEvent;
 import net.dv8tion.jda.api.hooks.ListenerAdapter;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import nl.finnt730.util.Utils;
 
 public class GnomeBotDevListener extends ListenerAdapter {
 	private static final Logger logger = LoggerFactory.getLogger("nl.finnt730.linkconverter");
 	private static final String GNOMEBOT_DOMAIN = "gnomebot.dev";
 	private static final String MCLOGS_PATH = "/paste/mclogs/";
-	private static final String SHIELD_EMOJI = "🛡️";
-	private static final Emoji SHIELD_EMOJI_OBJ = Emoji.fromUnicode(SHIELD_EMOJI);
+	private static final String LINK_EMOJI = "🔗";
+	private static final Emoji LINK_EMOJI_OBJ = Emoji.fromUnicode(LINK_EMOJI);
 
-	private static final Pattern GNOMEBOT_PATTERN = Pattern.compile(
-			"https?://" + Pattern.quote(GNOMEBOT_DOMAIN) + Pattern.quote(MCLOGS_PATH) + "([a-zA-Z0-9]+)",
-			Pattern.CASE_INSENSITIVE);
-	private static final Pattern LOGS_UPLOADED_PATTERN = Pattern
-			.compile("The logs have been uploaded to `" + Pattern.quote(GNOMEBOT_DOMAIN) + "`");
+	private static final Pattern MARKDOWN_LINK_PATTERN = Pattern.compile("\\[([^\\]]+)\\]\\((<?https://"
+			+ Pattern.quote(GNOMEBOT_DOMAIN) + Pattern.quote(MCLOGS_PATH) + "([a-zA-Z0-9]+)>?)\\)");
+
+	private static final Pattern BARE_LINK_PATTERN = Pattern
+			.compile("(https://" + Pattern.quote(GNOMEBOT_DOMAIN) + Pattern.quote(MCLOGS_PATH) + "([a-zA-Z0-9]+))");
 
 	@Override
 	public void onMessageReceived(MessageReceivedEvent event) {
@@ -32,12 +32,10 @@ public class GnomeBotDevListener extends ListenerAdapter {
 				return;
 			}
 
-			Message message = event.getMessage();
-			String content = message.getContentRaw();
-
-			if (content.contains(GNOMEBOT_DOMAIN)) {
-				logger.debug("Found gnomebot.dev link in message from user {}", event.getAuthor().getName());
-				message.addReaction(SHIELD_EMOJI_OBJ).queue();
+			// Only react to CA dump messages
+			if (Utils.isProbablyCADump(event.getMessage())) {
+				logger.debug("Detected CA dump from user {}", event.getAuthor().getName());
+				event.getMessage().addReaction(LINK_EMOJI_OBJ).queue();
 			}
 		} catch (Exception e) {
 			logger.error("Error processing message for link conversion setup", e);
@@ -51,20 +49,17 @@ public class GnomeBotDevListener extends ListenerAdapter {
 				return;
 			}
 
-			if (SHIELD_EMOJI.equals(event.getReaction().getEmoji().getName())) {
+			if (LINK_EMOJI.equals(event.getReaction().getEmoji().getName())) {
 				logger.info("Link conversion reaction triggered by user {} on message {}", event.getUser().getName(),
 						event.getMessageId());
 
 				event.getChannel().retrieveMessageById(event.getMessageId()).queue(message -> {
-					// Clear all reactions first to prevent duplicate processing
 					message.clearReactions().queue(v -> {
 						try {
 							String content = message.getContentRaw();
-							final String convertedContent = LOGS_UPLOADED_PATTERN.matcher(convertGnomebotLinks(content))
-									.replaceAll("The logs have been uploaded to `mclo.gs`");
-
-							if (!convertedContent.equals(content)) {
-								message.reply(convertedContent).mentionRepliedUser(false).queue();
+							String result = extractAndConvertLinks(content);
+							if (!result.isEmpty()) {
+								message.reply("MCLogs: " + result).mentionRepliedUser(false).queue();
 							}
 						} catch (Exception e) {
 							logger.error("Error processing link conversion reaction", e);
@@ -77,20 +72,36 @@ public class GnomeBotDevListener extends ListenerAdapter {
 		}
 	}
 
-	private String convertGnomebotLinks(String content) {
-		Matcher matcher = GNOMEBOT_PATTERN.matcher(content);
-		StringBuffer result = new StringBuffer();
+	private String extractAndConvertLinks(String content) {
+		StringBuilder output = new StringBuilder();
 
-		while (matcher.find()) {
-			String originalLink = matcher.group(0);
-			String linkId = matcher.group(1);
+		Matcher markdownMatcher = MARKDOWN_LINK_PATTERN.matcher(content);
+		while (markdownMatcher.find()) {
+			String rawLabel = markdownMatcher.group(1);
+			String linkId = markdownMatcher.group(3);
 			String mcloLink = "https://mclo.gs/" + linkId;
 
-			logger.debug("Converting link: {} -> {}", originalLink, mcloLink);
-			matcher.appendReplacement(result, mcloLink);
-		}
-		matcher.appendTail(result);
+			String label = (rawLabel != null) ? rawLabel.trim() : "";
+			if (label.isEmpty()) {
+				label = "link";
+			}
 
-		return result.toString();
+			if (output.length() > 0)
+				output.append(" | ");
+			output.append("[").append(label).append("](<").append(mcloLink).append(">)");
+		}
+
+		String withoutMarkdown = MARKDOWN_LINK_PATTERN.matcher(content).replaceAll("");
+		Matcher bareMatcher = BARE_LINK_PATTERN.matcher(withoutMarkdown);
+		while (bareMatcher.find()) {
+			String linkId = bareMatcher.group(2);
+			String mcloLink = "https://mclo.gs/" + linkId;
+
+			if (output.length() > 0)
+				output.append(" | ");
+			output.append("<").append(mcloLink).append(">");
+		}
+
+		return output.toString();
 	}
 }
